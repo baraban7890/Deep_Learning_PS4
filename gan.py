@@ -1,8 +1,9 @@
 from __future__ import print_function
+from re import I
 
 import torch
 import torch.utils.data
-from torch import nn, optim
+from torch import conv2d, nn, optim
 import os
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -31,7 +32,7 @@ def sample_noise(batch_size, noise_dim, dtype=torch.float, device="cpu"):
     # TODO: Implement sample_noise.                                              #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    noise = torch.empty(batch_size,noise_dim,device=device).normal_(mean=0,std=1)
     ##############################################################################
     #                              END OF YOUR CODE                              #
     ##############################################################################
@@ -49,7 +50,15 @@ def discriminator():
     # TODO: Implement discriminator.                                           #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    model = nn.Sequential(
+          nn.Linear(784, 400, bias=True, dtype=torch.float),
+          nn.LeakyReLU(0.05),
+          nn.Linear(400, 200, bias=True, dtype=torch.float),
+          nn.LeakyReLU(0.05),
+          nn.Linear(200, 100, bias=True, dtype=torch.float),
+          nn.LeakyReLU(0.05),
+          nn.Linear(100, 1, bias=True, dtype=torch.float)
+        )
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -67,7 +76,16 @@ def generator(noise_dim=NOISE_DIM):
     # TODO: Implement generator.                                               #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    model = nn.Sequential(
+      nn.Linear(noise_dim, 128, bias=True, dtype=torch.float),
+      nn.ReLU(),
+      nn.Linear(128, 256, bias=True, dtype=torch.float),
+      nn.ReLU(),
+      nn.Linear(256, 512, bias=True, dtype=torch.float),
+      nn.ReLU(),
+      nn.Linear(512, 784, bias=True, dtype=torch.float),
+      nn.Tanh()
+    )
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -91,7 +109,10 @@ def discriminator_loss(logits_real, logits_fake):
     # TODO: Implement discriminator_loss.                                        #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    loss_real = nn.functional.binary_cross_entropy_with_logits(logits_real, torch.ones_like(logits_real))
+    loss_fake = nn.functional.binary_cross_entropy_with_logits(logits_fake, torch.zeros_like(logits_fake))
+    loss = loss_real + loss_fake
+    return loss
     ##############################################################################
     #                              END OF YOUR CODE                              #
     ##############################################################################
@@ -113,7 +134,7 @@ def generator_loss(logits_fake):
     # TODO: Implement generator_loss.                                            #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    loss = nn.functional.binary_cross_entropy_with_logits(logits_fake, torch.ones_like(logits_fake))
     ##############################################################################
     #                              END OF YOUR CODE                              #
     ##############################################################################
@@ -136,7 +157,7 @@ def get_optimizer(model):
     # TODO: Implement optimizer.                                                 #
     ##############################################################################
     # Replace "pass" statement with your code
-    pass
+    optimizer = torch.optim.Adam(model.parameters(),lr = 1e-3,betas = (.05,.999))
     ##############################################################################
     #                              END OF YOUR CODE                              #
     ##############################################################################
@@ -174,8 +195,18 @@ def run_a_gan(D, G, D_solver, G_solver, loader_train, discriminator_loss, genera
       # IMPORTANT: make sure to pre-process your real data (real images),          #
       # so as to make it in the range [-1,1].                                      #
       ##############################################################################
-      d_total_error = None
-      pass
+      d_total_error = 0
+      noise = sample_noise(batch_size,noise_size,device=device)
+      fake_images = G(noise)
+      real_images = x.reshape(batch_size, -1).to(device)
+      real_images = (real_images - 0.5) * 2
+      logits_real = D(real_images)
+      logits_fake = D(G(noise))
+      d_total_error += discriminator_loss(logits_real, logits_fake)
+      D_solver.zero_grad()
+      d_total_error.backward(retain_graph=True)
+      D_solver.step()
+    
       ##############################################################################
       #                              END OF YOUR CODE                              #
       ##############################################################################        
@@ -189,11 +220,11 @@ def run_a_gan(D, G, D_solver, G_solver, loader_train, discriminator_loss, genera
       # by G in the variable 'fake_images', which will be used to visualize the    #
       # generated images.
       ##############################################################################
-      g_error = None
-      fake_images = None
-
-      pass
-  
+      g_error = 0
+      G_solver.zero_grad()
+      g_error += generator_loss(logits_fake)
+      g_error.backward(retain_graph=True)
+      G_solver.step()
       ##############################################################################
       #                              END OF YOUR CODE                              #
       ############################################################################## 
@@ -221,7 +252,19 @@ def build_dc_classifier():
     # TODO: Implement build_dc_classifier.                                     #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    model = nn.Sequential(
+      nn.Unflatten(1, (1,28,28)),
+      nn.Conv2d(1,32,(5,5),stride=1),
+      nn.LeakyReLU(.01),
+      nn.MaxPool2d((2,2),stride=2),
+      nn.Conv2d(32,64,(5,5),stride=1),
+      nn.LeakyReLU(.01),
+      nn.MaxPool2d((2,2),stride=2),
+      nn.Flatten(),
+      nn.Linear(4*4*64,4*4*64),
+      nn.LeakyReLU(.01),
+      nn.Linear(4*4*64,1)
+    )
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -239,7 +282,21 @@ def build_dc_generator(noise_dim=NOISE_DIM):
     # TODO: Implement build_dc_generator.                                      #
     ############################################################################
     # Replace "pass" statement with your code
-    pass
+    model = nn.Sequential(
+      nn.Linear(NOISE_DIM,1024),
+      nn.ReLU(),
+      nn.BatchNorm1d(1024),
+      nn.Linear(1024,7*7*128),
+      nn.ReLU(),
+      nn.BatchNorm1d(7*7*128),
+      nn.Unflatten(1, (128,7,7)),
+      nn.ConvTranspose2d(128,64,(4,4),stride=2,padding=1),
+      nn.ReLU(),
+      nn.BatchNorm2d(64),
+      nn.ConvTranspose2d(64,1,(4,4),stride=2,padding=1),
+      nn.Tanh(),
+      nn.Flatten()
+    )
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
